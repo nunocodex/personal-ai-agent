@@ -1,0 +1,25 @@
+# Virtual environment
+.venv/
+
+# Personal documents - NEVER on GitHub
+documents/
+
+# ChromaDB database with personal data
+data/
+
+# Windows system files
+Thumbs.db
+desktop.ini
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Editor
+.vscode/
+.idea/
+
+# Environment variables (API keys, etc.)
+.env
