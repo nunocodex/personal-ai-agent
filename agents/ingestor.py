@@ -6,8 +6,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from core.config import (
     INBOX_DIR,
     DOCUMENTS_DIR,
-    CHUNK_SIZE,
-    CHUNK_OVERLAP,
+    get_chunk_strategy,
 )
 from core.vectorstore import get_collection
 from tools.loaders import load_document
@@ -21,15 +20,12 @@ def run():
     For each document:
       1. Loads the content
       2. Asks the LLM to extract all metadata (category, summary, entities, etc.)
-      3. Splits the content into chunks
-      4. Indexes chunks + metadata into ChromaDB
-      5. Moves the file to the correct category folder (auto-created if needed)
+      3. Picks the chunking strategy based on the LLM-assigned category
+      4. Splits the content into chunks
+      5. Indexes chunks + metadata into ChromaDB
+      6. Moves the file to the correct category folder (auto-created if needed)
     """
     collection = get_collection()
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
-    )
 
     files = [f for f in INBOX_DIR.iterdir() if f.is_file()]
 
@@ -72,7 +68,16 @@ def run():
         print(f"   📝 Summary: {metadata.get('summary', 'N/A')}")
         print(f"   🏷️  Topics: {metadata.get('topics', 'N/A')}")
 
-        # 4. Split into chunks and index into ChromaDB
+        # 4. Pick chunking strategy based on category
+        strategy = get_chunk_strategy(category)
+        print(f"   ✂️  Chunk strategy: size={strategy['chunk_size']}, overlap={strategy['chunk_overlap']}")
+
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=strategy["chunk_size"],
+            chunk_overlap=strategy["chunk_overlap"],
+        )
+
+        # 5. Split into chunks and index into ChromaDB
         chunks = splitter.split_documents(documents)
         print(f"   ✂️  Split into {len(chunks)} chunk(s)")
 
@@ -93,14 +98,14 @@ def run():
             print(f"   ❌ Indexing error: {e}\n")
             continue
 
-        # 5. Move file to category folder (auto-created if needed)
+        # 6. Move file to category folder (auto-created if needed)
         dest_folder = get_document_folder(DOCUMENTS_DIR, category)
         dest_path   = dest_folder / file_path.name
 
         # Handle duplicate filenames
         if dest_path.exists():
-            stem   = file_path.stem
-            suffix = file_path.suffix
+            stem      = file_path.stem
+            suffix    = file_path.suffix
             dest_path = dest_folder / f"{stem}_1{suffix}"
 
         shutil.move(str(file_path), str(dest_path))

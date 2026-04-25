@@ -10,22 +10,57 @@ DATA_DIR      = BASE_DIR / "data"
 OLLAMA_BASE_URL    = "http://localhost:11434"
 OLLAMA_LLM_MODEL   = "qwen3:8b"
 OLLAMA_EMBED_MODEL = "nomic-embed-text"
+OLLAMA_VISION_MODEL = "llama3.2-vision:11b"
 
 # ─── CHROMADB ─────────────────────────────────────────────────
 CHROMA_COLLECTION_NAME = "personal_documents"
-
-# ─── CHUNKING ─────────────────────────────────────────────────
-CHUNK_SIZE    = 500
-CHUNK_OVERLAP = 50
 
 # ─── SUPPORTED FILE FORMATS ───────────────────────────────────
 # To add a new format: add the extension here and its loader in tools/loaders.py
 SUPPORTED_EXTENSIONS = [".pdf", ".docx", ".md", ".txt", ".csv", ".xlsx"]
 
+# ─── ADAPTIVE CHUNKING STRATEGIES ─────────────────────────────
+CHUNK_STRATEGIES = {
+    "default": {
+        "chunk_size": 500,
+        "chunk_overlap": 50,
+    },
+    "finance": {
+        "chunk_size": 1500,
+        "chunk_overlap": 150,
+    },
+    "legal": {
+        "chunk_size": 1500,
+        "chunk_overlap": 150,
+    },
+    "tax": {
+        "chunk_size": 1500,
+        "chunk_overlap": 150,
+    },
+    "accounting": {
+        "chunk_size": 1500,
+        "chunk_overlap": 150,
+    },
+    "health": {
+        "chunk_size": 1000,
+        "chunk_overlap": 100,
+    },
+    "medical": {
+        "chunk_size": 1000,
+        "chunk_overlap": 100,
+    },
+}
+
+
+def get_chunk_strategy(category: str) -> dict:
+    """
+    Returns the chunking strategy for a given category.
+    Falls back to 'default' if the category is not explicitly mapped.
+    """
+    return CHUNK_STRATEGIES.get(category.lower(), CHUNK_STRATEGIES["default"])
+
+
 # ─── METADATA EXTRACTION PROMPT ───────────────────────────────
-# The LLM decides category, subcategory and all other metadata freely.
-# No hardcoded categories — the agent reasons autonomously.
-# To add more metadata fields: extend the JSON schema in the prompt below.
 METADATA_EXTRACTION_PROMPT = """You are a document analyst. Analyze the document content below and extract all available metadata.
 
 Return ONLY a valid JSON object with this structure (no extra text, no markdown):
@@ -48,3 +83,8 @@ Rules:
 
 Document content (first 500 words):
 {content}"""
+
+# ─── VISION EXTRACTION PROMPT ─────────────────────────────────
+VISION_EXTRACTION_PROMPT = """This is a page from a document. Extract ALL visible text and data you can see.
+Include: names, dates, monetary values, labels, table contents, and any other information.
+Format the output as clean, structured text. Be thorough and accurate."""
