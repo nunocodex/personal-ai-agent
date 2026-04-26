@@ -24,7 +24,7 @@ def run_ingest():
     for file_path in files:
         print(f"📄 Processing: {file_path.name}")
         try:
-            ingest_run(str(file_path))
+            ingest_run(str(file_path).replace("\\", "/"))
         except Exception as e:
             print(f"❌ Failed: {file_path.name} — {e}")
 

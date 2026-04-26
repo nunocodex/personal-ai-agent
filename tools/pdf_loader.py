@@ -20,9 +20,10 @@ from core.config import (
     BASE_DIR,
 )
 
-VISION_PAGE_DELAY = 5
+VISION_PAGE_DELAY = 2
 VISION_MAX_RETRIES = 3
-VISION_TIMEOUT = 300  # 5 minutes per page
+VISION_TIMEOUT = 180
+VISION_DPI = 150
 
 
 def _is_scanned(file_path: Path) -> bool:
@@ -59,15 +60,12 @@ def _normalize(text: str) -> str:
     )
 
 
-def _is_quality(text: str) -> bool:
-    words = text.split()
-    if len(words) < 5:
-        return False
-    single = sum(1 for w in words[:30] if len(w) == 1)
-    return single / min(len(words), 30) <= 0.6
+def _img_to_b64(img_path: Path) -> str:
+    with open(str(img_path), "rb") as f:
+        return base64.b64encode(f.read()).decode()
 
 
-def _call_vision(img_b64: str, page_num: int, total: int) -> str:
+def _call_vision_b64(img_b64: str, label: str) -> str:
     payload = json.dumps({
         "model": OLLAMA_VISION_MODEL,
         "prompt": VISION_EXTRACTION_PROMPT,
@@ -77,7 +75,7 @@ def _call_vision(img_b64: str, page_num: int, total: int) -> str:
 
     for attempt in range(1, VISION_MAX_RETRIES + 1):
         try:
-            print(f"   👁️  Page {page_num}/{total} (attempt {attempt})...")
+            print(f"   👁️  {label} (attempt {attempt})...")
             req = urllib.request.Request(
                 f"{OLLAMA_BASE_URL}/api/generate",
                 data=payload,
@@ -85,28 +83,32 @@ def _call_vision(img_b64: str, page_num: int, total: int) -> str:
                 method="POST",
             )
             with urllib.request.urlopen(req, timeout=VISION_TIMEOUT) as resp:
-                result = json.loads(resp.read().decode())
-            return result.get("response", "").strip()
+                text = json.loads(resp.read().decode()).get("response", "").strip()
+                if text:
+                    return text
+                print(f"   ⚠️  Empty response, retrying...")
         except Exception as e:
-            print(f"   ⚠️  Page {page_num} attempt {attempt} failed: {e}")
+            print(f"   ⚠️  {label} attempt {attempt} failed: {e}")
             if attempt < VISION_MAX_RETRIES:
-                wait = VISION_PAGE_DELAY * attempt * 2
-                print(f"   ⏳ Waiting {wait}s before retry...")
-                time.sleep(wait)
+                time.sleep(VISION_PAGE_DELAY * attempt * 2)
 
-    print(f"   ❌ Page {page_num} failed after {VISION_MAX_RETRIES} attempts, skipping.")
     return ""
 
 
 def _extract_vision(file_path: Path) -> list:
+    """
+    Extracts each PDF page via vision model.
+    Each page is split into 3 sections (top/middle/bottom) to stay within
+    the model's image size limits. Results are merged into one Document per page.
+    """
     try:
         from pdf2image import convert_from_path
     except ImportError:
         raise ImportError("Run: pip install pdf2image")
 
-    print(f"   👁️  Vision extraction ({OLLAMA_VISION_MODEL}) — all pages...")
+    print(f"   👁️  Vision extraction ({OLLAMA_VISION_MODEL}) — 3-section split...")
 
-    kwargs = {"dpi": 200}
+    kwargs = {"dpi": VISION_DPI}
     if POPPLER_PATH:
         kwargs["poppler_path"] = POPPLER_PATH
 
@@ -118,23 +120,41 @@ def _extract_vision(file_path: Path) -> list:
     total = len(pages_img)
 
     for i, page_img in enumerate(pages_img):
-        img_path = img_dir / f"_vision_p{i}.jpg"
-        page_img.save(str(img_path), "JPEG")
+        w, h = page_img.width, page_img.height
+        page_texts = []
 
-        with open(str(img_path), "rb") as f:
-            img_b64 = base64.b64encode(f.read()).decode()
+        sections = [
+            ("top",    (0, 0,           w, h // 3)),
+            ("middle", (0, h // 3,      w, (h * 2) // 3)),
+            ("bottom", (0, (h * 2) // 3, w, h)),
+        ]
 
-        img_path.unlink(missing_ok=True)
+        for section, box in sections:
+            crop = page_img.crop(box)
+            img_path = img_dir / f"_vision_p{i}_{section}.jpg"
+            crop.save(str(img_path), "JPEG")
+            img_b64 = _img_to_b64(img_path)
+            img_path.unlink(missing_ok=True)
 
-        text = _call_vision(img_b64, i + 1, total)
-        if text:
+            text = _call_vision_b64(img_b64, f"Page {i + 1}/{total} {section}")
+            if text:
+                page_texts.append(text)
+
+            time.sleep(VISION_PAGE_DELAY)
+
+        if page_texts:
+            merged = "\n\n".join(page_texts)
             documents.append(Document(
-                page_content=text,
-                metadata={"source": str(file_path), "page": i + 1, "extraction": "vision"},
+                page_content=merged,
+                metadata={
+                    "source": str(file_path),
+                    "page": i + 1,
+                    "extraction": "vision",
+                    "page_as_chunk": True,
+                },
             ))
 
         if i < total - 1:
-            print(f"   ⏳ Waiting {VISION_PAGE_DELAY}s...")
             time.sleep(VISION_PAGE_DELAY)
 
     return documents
@@ -169,7 +189,7 @@ def _extract_layout(file_path: Path) -> list:
 
         lines = [re.sub(r'\s+', ' ', " | ".join(t for _, t in row)).strip() for row in rows]
         page_text = "\n".join(l for l in lines if l)
-        if page_text and _is_quality(page_text):
+        if page_text:
             documents.append(Document(
                 page_content=page_text,
                 metadata={"source": str(file_path), "page": page_num + 1, "extraction": "layout"},
@@ -180,14 +200,14 @@ def _extract_layout(file_path: Path) -> list:
 
 def load_pdf(file_path: Path) -> list:
     """
-    Intelligent PDF loader — 4 strategies:
-    1. Scanned PDF         → vision (all pages)
-    2. Tables + spaced     → vision (all pages)
-    3. Tables              → pdfplumber
-    4. Plain text          → pymupdf4llm
+    Intelligent PDF loader:
+    1. Scanned         → vision (3-section split)
+    2. Tables + spaced → vision (3-section split)
+    3. Tables          → pdfplumber
+    4. Plain text      → pymupdf4llm
     """
     if _is_scanned(file_path):
-        print(f"   ⚠️  Scanned PDF → vision (all pages)...")
+        print(f"   ⚠️  Scanned PDF → vision...")
         return _extract_vision(file_path)
 
     if _has_tables(file_path):
@@ -195,7 +215,7 @@ def load_pdf(file_path: Path) -> list:
             first = pdf.pages[0].extract_text() or ""
 
         if _has_spaced_text(first):
-            print(f"   📊 Tables + encoding issue → vision (all pages)...")
+            print(f"   📊 Tables + encoding issue → vision...")
             return _extract_vision(file_path)
 
         print(f"   📊 Tables → pdfplumber...")
@@ -218,6 +238,6 @@ def load_pdf(file_path: Path) -> list:
     print(f"   📄 Plain text → pymupdf4llm...")
     md = pymupdf4llm.to_markdown(str(file_path))
     if _has_spaced_text(md):
-        print(f"   ⚠️  Encoding issue → vision (all pages)...")
+        print(f"   ⚠️  Encoding issue → vision...")
         return _extract_vision(file_path)
     return [Document(page_content=_normalize(md), metadata={"source": str(file_path)})]

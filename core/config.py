@@ -14,12 +14,12 @@ QDRANT_DIR    = DATA_DIR / "qdrant"
 # ─── OLLAMA ───────────────────────────────────────────────────
 OLLAMA_BASE_URL     = "http://localhost:11434"
 OLLAMA_LLM_MODEL    = "qwen3:8b"
-OLLAMA_EMBED_MODEL  = "mxbai-embed-large"
+OLLAMA_EMBED_MODEL  = "qwen3-embedding:0.6b"
 OLLAMA_VISION_MODEL = "qwen3-vl:2b"
 
 # ─── QDRANT ───────────────────────────────────────────────────
 QDRANT_COLLECTION   = "personal_documents"
-EMBEDDING_SIZE      = 1024  # mxbai-embed-large output size
+EMBEDDING_SIZE      = 1024
 
 # ─── POPPLER (PDF rendering) ──────────────────────────────────
 POPPLER_PATH = os.getenv("POPPLER_PATH", None)
@@ -55,8 +55,11 @@ Return ONLY a valid JSON object (no extra text, no markdown):
 Document content (first 500 words):
 {content}"""
 
-VISION_EXTRACTION_PROMPT = """Extract ALL visible text and numeric values from this document page.
-For each label or field you see, extract the corresponding value next to it.
-Do not repeat the same value for different fields.
-Format as structured text with label: value pairs.
-Be precise and accurate."""
+VISION_EXTRACTION_PROMPT = """This is a page from an Italian payslip (busta paga).
+Extract ALL visible text and numeric values. Pay special attention to:
+- Employee name and fiscal code
+- Month and year
+- All monetary values with their labels (retribuzione lorda, netto a pagare, INPS, IRPEF, etc.)
+- All table rows with amounts
+
+Format as structured label: value pairs. Be thorough - include every number you see."""
