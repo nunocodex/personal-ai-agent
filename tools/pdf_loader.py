@@ -24,6 +24,7 @@ VISION_PAGE_DELAY = 2
 VISION_MAX_RETRIES = 3
 VISION_TIMEOUT = 180
 VISION_DPI = 150
+VISION_SECTIONS = 6  # number of horizontal slices per page
 
 
 def _is_scanned(file_path: Path) -> bool:
@@ -98,7 +99,7 @@ def _call_vision_b64(img_b64: str, label: str) -> str:
 def _extract_vision(file_path: Path) -> list:
     """
     Extracts each PDF page via vision model.
-    Each page is split into 3 sections (top/middle/bottom) to stay within
+    Each page is split into VISION_SECTIONS horizontal slices to stay within
     the model's image size limits. Results are merged into one Document per page.
     """
     try:
@@ -106,7 +107,7 @@ def _extract_vision(file_path: Path) -> list:
     except ImportError:
         raise ImportError("Run: pip install pdf2image")
 
-    print(f"   👁️  Vision extraction ({OLLAMA_VISION_MODEL}) — 3-section split...")
+    print(f"   👁️  Vision extraction ({OLLAMA_VISION_MODEL}) — {VISION_SECTIONS}-section split...")
 
     kwargs = {"dpi": VISION_DPI}
     if POPPLER_PATH:
@@ -123,20 +124,18 @@ def _extract_vision(file_path: Path) -> list:
         w, h = page_img.width, page_img.height
         page_texts = []
 
-        sections = [
-            ("top",    (0, 0,           w, h // 3)),
-            ("middle", (0, h // 3,      w, (h * 2) // 3)),
-            ("bottom", (0, (h * 2) // 3, w, h)),
-        ]
+        for s in range(VISION_SECTIONS):
+            y0 = int(h * s / VISION_SECTIONS)
+            y1 = int(h * (s + 1) / VISION_SECTIONS)
+            label = f"Page {i + 1}/{total} section {s + 1}/{VISION_SECTIONS}"
 
-        for section, box in sections:
-            crop = page_img.crop(box)
-            img_path = img_dir / f"_vision_p{i}_{section}.jpg"
+            crop = page_img.crop((0, y0, w, y1))
+            img_path = img_dir / f"_vision_p{i}_s{s}.jpg"
             crop.save(str(img_path), "JPEG")
             img_b64 = _img_to_b64(img_path)
             img_path.unlink(missing_ok=True)
 
-            text = _call_vision_b64(img_b64, f"Page {i + 1}/{total} {section}")
+            text = _call_vision_b64(img_b64, label)
             if text:
                 page_texts.append(text)
 
@@ -201,8 +200,8 @@ def _extract_layout(file_path: Path) -> list:
 def load_pdf(file_path: Path) -> list:
     """
     Intelligent PDF loader:
-    1. Scanned         → vision (3-section split)
-    2. Tables + spaced → vision (3-section split)
+    1. Scanned         → vision (6-section split)
+    2. Tables + spaced → vision (6-section split)
     3. Tables          → pdfplumber
     4. Plain text      → pymupdf4llm
     """
