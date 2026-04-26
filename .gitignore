@@ -1,0 +1,23 @@
+# Virtual environment
+.venv/
+
+# Personal documents - NEVER on GitHub
+documents/
+
+# Qdrant database with personal data
+data/
+
+# Environment variables
+.env
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Editor
+.vscode/
+.idea/
