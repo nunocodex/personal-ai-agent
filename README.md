@@ -108,6 +108,6 @@ MIT License — see [LICENSE](LICENSE)
 
 ## 👤 Author
 
-**NunoCodex** — Senior PHP Developer transitioning to AI engineering.
+**NunoCodex** — PHP Developer transitioning to AI engineering.
 
 [GitHub](https://github.com/NunoCodex)
